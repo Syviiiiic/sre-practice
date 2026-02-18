@@ -187,11 +187,14 @@ go 1.21
 require github.com/prometheus/client_golang v1.17.0
 EOF
 
+# Пустой go.sum для кэширования слоев
+touch services/api-gateway/go.sum
+
 cat > services/api-gateway/Dockerfile << 'EOF'
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
-COPY go.mod ./
-RUN go mod tidy
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 FROM alpine:latest
@@ -399,11 +402,13 @@ require (
 )
 EOF
 
+touch services/order-service/go.sum
+
 cat > services/order-service/Dockerfile << 'EOF'
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
-COPY go.mod ./
-RUN go mod tidy
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 FROM alpine:latest
@@ -544,11 +549,13 @@ go 1.21
 require github.com/prometheus/client_golang v1.17.0
 EOF
 
+touch services/payment-service/go.sum
+
 cat > services/payment-service/Dockerfile << 'EOF'
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
-COPY go.mod ./
-RUN go mod tidy
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 FROM alpine:latest
@@ -734,11 +741,13 @@ module chaos-engine
 go 1.21
 EOF
 
+touch services/chaos-engine/go.sum
+
 cat > services/chaos-engine/Dockerfile << 'EOF'
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
-COPY go.mod ./
-RUN go mod tidy
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 FROM alpine:latest
