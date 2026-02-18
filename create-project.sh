@@ -859,7 +859,7 @@ datasources:
 EOF
 
 # === DOCKER COMPOSE ===
-cat > docker compose.yml << 'EOF'
+cat > docker-compose.yml << 'EOF'
 version: '3.8'
 
 services:
@@ -1079,7 +1079,7 @@ networks:
     driver: bridge
 EOF
 
-# === DEPLOY SCRIPTS ===
+# === DEPLOY SCRIPT (ИСПРАВЛЕННЫЙ С docker compose) ===
 cat > deploy.sh << 'EOF'
 #!/bin/bash
 set -e
@@ -1110,9 +1110,15 @@ docker compose up -d chaos-engine
 
 echo ""
 echo "=== Deployment Complete ==="
-echo "Grafana:    http://$(curl -s ifconfig.me 2>/dev/null || echo 'localhost'):3000 (admin/admin)"
-echo "Prometheus: http://$(curl -s ifconfig.me 2>/dev/null || echo 'localhost'):9090"
-echo "API:        http://$(curl -s ifconfig.me 2>/dev/null || echo 'localhost'):8080"
+IP=$(curl -s ifconfig.me 2>/dev/null || echo "localhost")
+echo "Grafana:    http://$IP:3000 (admin/admin)"
+echo "Prometheus: http://$IP:9090"
+echo "API:        http://$IP:8080"
+echo ""
+echo "Useful commands:"
+echo "  View logs:    docker compose logs -f [service]"
+echo "  Stop all:     docker compose down"
+echo "  View stats:   docker stats"
 EOF
 
 chmod +x deploy.sh
