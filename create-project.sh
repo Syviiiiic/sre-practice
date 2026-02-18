@@ -859,7 +859,7 @@ datasources:
 EOF
 
 # === DOCKER COMPOSE ===
-cat > docker-compose.yml << 'EOF'
+cat > docker compose.yml << 'EOF'
 version: '3.8'
 
 services:
@@ -1091,22 +1091,22 @@ sudo sysctl -w fs.file-max=65536 2>/dev/null || true
 sudo sysctl -w vm.max_map_count=262144 2>/dev/null || true
 
 echo "Building services..."
-docker-compose build --parallel
+docker compose build --parallel
 
 echo "Starting infrastructure..."
-docker-compose up -d postgres redis
+docker compose up -d postgres redis
 
 echo "Waiting for databases..."
 sleep 5
 
 echo "Starting services..."
-docker-compose up -d order-service payment-service api-gateway
+docker compose up -d order-service payment-service api-gateway
 
 echo "Starting monitoring..."
-docker-compose up -d prometheus loki grafana postgres-exporter redis-exporter
+docker compose up -d prometheus loki grafana postgres-exporter redis-exporter
 
 echo "Starting chaos engine..."
-docker-compose up -d chaos-engine
+docker compose up -d chaos-engine
 
 echo ""
 echo "=== Deployment Complete ==="
