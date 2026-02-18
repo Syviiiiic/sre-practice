@@ -12,7 +12,6 @@ cat > services/api-gateway/main.go << 'EOF'
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -182,11 +181,17 @@ func getEnv(key, defaultValue string) string {
 }
 EOF
 
+cat > services/api-gateway/go.mod << 'EOF'
+module api-gateway
+go 1.21
+require github.com/prometheus/client_golang v1.17.0
+EOF
+
 cat > services/api-gateway/Dockerfile << 'EOF'
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
+COPY go.mod ./
+RUN go mod tidy
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 FROM alpine:latest
@@ -196,24 +201,6 @@ COPY --from=builder /app/main .
 EXPOSE 8080
 CMD ["./main"]
 EOF
-
-cat > services/api-gateway/go.mod << 'EOF'
-module api-gateway
-go 1.21
-require github.com/prometheus/client_golang v1.17.0
-require (
-	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/prometheus/client_model v0.4.1-0.20230718164431-9a2bf3000d16 // indirect
-	github.com/prometheus/common v0.44.0 // indirect
-	github.com/prometheus/procfs v0.11.1 // indirect
-	golang.org/x/sys v0.11.0 // indirect
-	google.golang.org/protobuf v1.31.0 // indirect
-)
-EOF
-
-echo "module api-gateway" > services/api-gateway/go.sum
 
 # === ORDER SERVICE ===
 cat > services/order-service/main.go << 'EOF'
@@ -402,21 +389,6 @@ func getEnv(key, defaultValue string) string {
 }
 EOF
 
-cat > services/order-service/Dockerfile << 'EOF'
-FROM golang:1.21-alpine AS builder
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates wget
-WORKDIR /root/
-COPY --from=builder /app/main .
-EXPOSE 8081
-CMD ["./main"]
-EOF
-
 cat > services/order-service/go.mod << 'EOF'
 module order-service
 go 1.21
@@ -425,16 +397,21 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/prometheus/client_golang v1.17.0
 )
-require (
-	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/prometheus/client_model v0.4.1-0.20230718164431-9a2bf3000d16 // indirect
-	github.com/prometheus/common v0.44.0 // indirect
-	github.com/prometheus/procfs v0.11.1 // indirect
-	golang.org/x/sys v0.11.0 // indirect
-	google.golang.org/protobuf v1.31.0 // indirect
-)
+EOF
+
+cat > services/order-service/Dockerfile << 'EOF'
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY go.mod ./
+RUN go mod tidy
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates wget
+WORKDIR /root/
+COPY --from=builder /app/main .
+EXPOSE 8081
+CMD ["./main"]
 EOF
 
 # === PAYMENT SERVICE ===
@@ -561,11 +538,17 @@ func getEnv(key, defaultValue string) string {
 }
 EOF
 
+cat > services/payment-service/go.mod << 'EOF'
+module payment-service
+go 1.21
+require github.com/prometheus/client_golang v1.17.0
+EOF
+
 cat > services/payment-service/Dockerfile << 'EOF'
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
+COPY go.mod ./
+RUN go mod tidy
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 FROM alpine:latest
@@ -574,22 +557,6 @@ WORKDIR /root/
 COPY --from=builder /app/main .
 EXPOSE 8082
 CMD ["./main"]
-EOF
-
-cat > services/payment-service/go.mod << 'EOF'
-module payment-service
-go 1.21
-require github.com/prometheus/client_golang v1.17.0
-require (
-	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/prometheus/client_model v0.4.1-0.20230718164431-9a2bf3000d16 // indirect
-	github.com/prometheus/common v0.44.0 // indirect
-	github.com/prometheus/procfs v0.11.1 // indirect
-	golang.org/x/sys v0.11.0 // indirect
-	google.golang.org/protobuf v1.31.0 // indirect
-)
 EOF
 
 # === CHAOS ENGINE ===
@@ -762,11 +729,16 @@ func getEnv(key, defaultValue string) string {
 }
 EOF
 
+cat > services/chaos-engine/go.mod << 'EOF'
+module chaos-engine
+go 1.21
+EOF
+
 cat > services/chaos-engine/Dockerfile << 'EOF'
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
 COPY go.mod ./
-RUN go mod init chaos-engine 2>/dev/null || true && go mod tidy
+RUN go mod tidy
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 FROM alpine:latest
@@ -1079,7 +1051,7 @@ networks:
     driver: bridge
 EOF
 
-# === DEPLOY SCRIPT (ИСПРАВЛЕННЫЙ С docker compose) ===
+# === DEPLOY SCRIPT ===
 cat > deploy.sh << 'EOF'
 #!/bin/bash
 set -e
