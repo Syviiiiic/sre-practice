@@ -69,8 +69,9 @@ func main() {
 	mux.HandleFunc("/api/status/", instrumentHandler("get_status", handleGetStatus(orderServiceURL)))
 
 	port := getEnv("PORT", "8080")
-	log.Printf("API Gateway starting on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	host := getEnv("HOST", "0.0.0.0")
+	log.Printf("API Gateway starting on %s:%s", host, port)
+	log.Fatal(http.ListenAndServe(host+":"+port, mux))
 }
 
 func instrumentHandler(name string, handler http.HandlerFunc) http.HandlerFunc {
@@ -279,8 +280,9 @@ func main() {
 	mux.HandleFunc("/orders/", orderStatusHandler)
 
 	port := getEnv("PORT", "8081")
-	log.Printf("Order Service starting on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	host := getEnv("HOST", "0.0.0.0")
+	log.Printf("Order Service starting on %s:%s", host, port)
+	log.Fatal(http.ListenAndServe(host+":"+port, mux))
 }
 
 func initDB() {
@@ -470,8 +472,9 @@ func main() {
 	mux.HandleFunc("/payments", paymentHandler)
 
 	port := getEnv("PORT", "8082")
-	log.Printf("Payment Service starting on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	host := getEnv("HOST", "0.0.0.0")
+	log.Printf("Payment Service starting on %s:%s", host, port)
+	log.Fatal(http.ListenAndServe(host+":"+port, mux))
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -879,6 +882,7 @@ services:
       - ORDER_SERVICE_URL=http://order-service:8081
       - PAYMENT_SERVICE_URL=http://payment-service:8082
       - PORT=8080
+      - HOST=0.0.0.0
     ports:
       - "8080:8080"
     depends_on:
@@ -907,6 +911,7 @@ services:
       - DB_NAME=orders
       - REDIS_HOST=redis
       - PORT=8081
+      - HOST=0.0.0.0
     depends_on:
       postgres:
         condition: service_healthy
@@ -929,6 +934,7 @@ services:
     build: ./services/payment-service
     environment:
       - PORT=8082
+      - HOST=0.0.0.0
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/health"]
       interval: 10s
