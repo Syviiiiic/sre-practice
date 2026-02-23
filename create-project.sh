@@ -5,7 +5,8 @@ mkdir -p $PROJECT_NAME && cd $PROJECT_NAME
 
 # Структура директорий
 mkdir -p services/{api-gateway,order-service,payment-service,chaos-engine}
-mkdir -p monitoring deploy
+mkdir -p monitoring/{dashboards,provisioning}
+mkdir -p deploy
 
 # === API GATEWAY ===
 cat > services/api-gateway/main.go << 'EOF'
@@ -780,6 +781,10 @@ scrape_configs:
   - job_name: 'redis-exporter'
     static_configs:
       - targets: ['redis-exporter:9121']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
 EOF
 
 cat > monitoring/loki-config.yml << 'EOF'
@@ -817,21 +822,364 @@ limits_config:
   ingestion_burst_size_mb: 16
 EOF
 
+# === GRAFANA DATASOURCES ===
 cat > monitoring/datasource.yml << 'EOF'
 apiVersion: 1
+
 datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
+    editable: false
+
   - name: Loki
     type: loki
     access: proxy
     url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
 EOF
 
-# === DOCKER COMPOSE С ОПТИМИЗИРОВАННЫМИ ЛИМИТАМИ ===
+# === GRAFANA DASHBOARD PROVISIONING ===
+cat > monitoring/provisioning/dashboards.yml << 'EOF'
+apiVersion: 1
+
+providers:
+  - name: 'default'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards
+EOF
+
+# === DASHBOARD: SYSTEM OVERVIEW ===
+cat > monitoring/dashboards/system-overview.json << 'EOF'
+{
+  "dashboard": {
+    "id": null,
+    "title": "System Overview",
+    "tags": ["system", "overview"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "refresh": "5s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "CPU Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "100 - (avg by (instance) (irate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "CPU %",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "yAxes": [{"min": 0, "max": 100}]
+      },
+      {
+        "id": 2,
+        "title": "Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100",
+            "legendFormat": "Memory %",
+            "refId": "B"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "yAxes": [{"min": 0, "max": 100}]
+      },
+      {
+        "id": 3,
+        "title": "Disk Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "(node_filesystem_size_bytes{fstype!=\"tmpfs\"} - node_filesystem_avail_bytes{fstype!=\"tmpfs\"}) / node_filesystem_size_bytes{fstype!=\"tmpfs\"} * 100",
+            "legendFormat": "{{mountpoint}}",
+            "refId": "C"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Network I/O",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "irate(node_network_receive_bytes_total[5m])",
+            "legendFormat": "RX {{device}}",
+            "refId": "D"
+          },
+          {
+            "expr": "irate(node_network_transmit_bytes_total[5m])",
+            "legendFormat": "TX {{device}}",
+            "refId": "E"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      }
+    ]
+  }
+}
+EOF
+
+# === DASHBOARD: MICROSERVICES ===
+cat > monitoring/dashboards/microservices.json << 'EOF'
+{
+  "dashboard": {
+    "id": null,
+    "title": "Microservices Health",
+    "tags": ["microservices", "app"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "refresh": "5s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate by Service",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[5m])) by (endpoint)",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Error Rate (%)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"5..|4..\"}[5m])) / sum(rate(http_requests_total[5m])) * 100",
+            "legendFormat": "Error %",
+            "refId": "B"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 5},
+                {"color": "red", "value": 10}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "P95 Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+            "legendFormat": "{{endpoint}} p95",
+            "refId": "C"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Payment Status Distribution",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "sum by (status) (payment_attempts_total)",
+            "legendFormat": "{{status}}",
+            "refId": "D"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Active Orders",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "active_orders_total",
+            "legendFormat": "Active",
+            "refId": "E"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Service Health Status",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "up{job=~\"api-gateway|order-service|payment-service\"}",
+            "format": "table",
+            "refId": "F"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 18, "x": 6, "y": 16}
+      }
+    ]
+  }
+}
+EOF
+
+# === DASHBOARD: DATABASE & INFRASTRUCTURE ===
+cat > monitoring/dashboards/infrastructure.json << 'EOF'
+{
+  "dashboard": {
+    "id": null,
+    "title": "Infrastructure & Database",
+    "tags": ["infrastructure", "database"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "PostgreSQL Connections",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "pg_stat_activity_count",
+            "legendFormat": "Connections",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "PostgreSQL Transactions",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "irate(pg_stat_database_xact_commit{datname=\"orders\"}[5m])",
+            "legendFormat": "Commits/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "irate(pg_stat_database_xact_rollback{datname=\"orders\"}[5m])",
+            "legendFormat": "Rollbacks/sec",
+            "refId": "C"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Redis Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "redis_memory_used_bytes / 1024 / 1024",
+            "legendFormat": "Memory MB",
+            "refId": "D"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Redis Operations/sec",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "irate(redis_commands_processed_total[5m])",
+            "legendFormat": "Ops/sec",
+            "refId": "E"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Container Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{name=~\"sre-practice.*\"} / 1024 / 1024",
+            "legendFormat": "{{name}}",
+            "refId": "F"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+      }
+    ]
+  }
+}
+EOF
+
+# === DASHBOARD: LOGS ===
+cat > monitoring/dashboards/logs.json << 'EOF'
+{
+  "dashboard": {
+    "id": null,
+    "title": "Application Logs",
+    "tags": ["logs"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "refresh": "5s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Error Logs",
+        "type": "logs",
+        "datasource": "Loki",
+        "targets": [
+          {
+            "expr": "{job=\"containerlogs\"} |= \"error\" or \"ERROR\" or \"Error\"",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {"h": 12, "w": 24, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "API Gateway Logs",
+        "type": "logs",
+        "datasource": "Loki",
+        "targets": [
+          {
+            "expr": "{container=\"sre-practice-api-gateway-1\"}",
+            "refId": "B"
+          }
+        ],
+        "gridPos": {"h": 12, "w": 12, "x": 0, "y": 12}
+      },
+      {
+        "id": 3,
+        "title": "Order Service Logs",
+        "type": "logs",
+        "datasource": "Loki",
+        "targets": [
+          {
+            "expr": "{container=\"sre-practice-order-service-1\"}",
+            "refId": "C"
+          }
+        ],
+        "gridPos": {"h": 12, "w": 12, "x": 12, "y": 12}
+      }
+    ]
+  }
+}
+EOF
+
+# === DOCKER COMPOSE ===
 cat > docker-compose.yml << 'EOF'
 version: '3.8'
 
@@ -1038,12 +1386,15 @@ services:
     image: grafana/grafana:10.1.0
     volumes:
       - ./monitoring/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - ./monitoring/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./monitoring/dashboards:/var/lib/grafana/dashboards
       - grafana_data:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost:3000
       - GF_DATABASE_TYPE=sqlite3
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/microservices.json
     ports:
       - "3000:3000"
     depends_on:
@@ -1154,6 +1505,12 @@ IP=$(curl -s ifconfig.me 2>/dev/null || echo "localhost")
 echo "Grafana:    http://$IP:3000 (admin/admin)"
 echo "Prometheus: http://$IP:9090"
 echo "API:        http://$IP:8080"
+echo ""
+echo "Dashboards available in Grafana:"
+echo "  - Microservices Health (default)"
+echo "  - System Overview"
+echo "  - Infrastructure & Database"
+echo "  - Application Logs"
 echo ""
 echo "Useful commands:"
 echo "  View logs:    docker compose logs -f [service]"
