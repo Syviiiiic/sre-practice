@@ -813,6 +813,8 @@ limits_config:
   enforce_metric_name: false
   reject_old_samples: true
   reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
 EOF
 
 cat > monitoring/datasource.yml << 'EOF'
@@ -829,7 +831,7 @@ datasources:
     url: http://loki:3100
 EOF
 
-# === DOCKER COMPOSE ===
+# === DOCKER COMPOSE С ОПТИМИЗИРОВАННЫМИ ЛИМИТАМИ ===
 cat > docker-compose.yml << 'EOF'
 version: '3.8'
 
@@ -840,22 +842,34 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: orders
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.3'
+          memory: 256M
+        reservations:
+          memory: 128M
     networks:
       - sre-network
+    command: >
+      postgres 
+      -c shared_buffers=64MB
+      -c effective_cache_size=192MB
+      -c maintenance_work_mem=32MB
+      -c work_mem=8MB
+      -c max_connections=50
 
   redis:
     image: redis:7-alpine
@@ -865,14 +879,16 @@ services:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 5
     deploy:
       resources:
         limits:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '0.1'
+          memory: 64M
+        reservations:
+          memory: 32M
     networks:
       - sre-network
 
@@ -886,18 +902,23 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - order-service
-      - payment-service
+      order-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
-      interval: 10s
+      interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 5s
     deploy:
       resources:
         limits:
-          cpus: '0.25'
-          memory: 128M
+          cpus: '0.1'
+          memory: 64M
+        reservations:
+          memory: 32M
     networks:
       - sre-network
 
@@ -919,14 +940,17 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/health"]
-      interval: 10s
+      interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 10s
     deploy:
       resources:
         limits:
-          cpus: '0.25'
-          memory: 128M
+          cpus: '0.1'
+          memory: 64M
+        reservations:
+          memory: 32M
     networks:
       - sre-network
 
@@ -937,14 +961,17 @@ services:
       - HOST=0.0.0.0
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/health"]
-      interval: 10s
+      interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 5s
     deploy:
       resources:
         limits:
-          cpus: '0.25'
-          memory: 128M
+          cpus: '0.1'
+          memory: 64M
+        reservations:
+          memory: 32M
     networks:
       - sre-network
 
@@ -957,8 +984,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.25'
-          memory: 64M
+          cpus: '0.1'
+          memory: 32M
+        reservations:
+          memory: 16M
       restart_policy:
         condition: on-failure
     networks:
@@ -973,14 +1002,18 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=1GB'
       - '--web.enable-lifecycle'
+      - '--query.max-samples=50000000'
     ports:
       - "9090:9090"
     deploy:
       resources:
         limits:
-          cpus: '0.25'
-          memory: 512M
+          cpus: '0.2'
+          memory: 256M
+        reservations:
+          memory: 128M
     networks:
       - sre-network
 
@@ -994,8 +1027,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '0.1'
+          memory: 128M
+        reservations:
+          memory: 64M
     networks:
       - sre-network
 
@@ -1007,6 +1042,8 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_DATABASE_TYPE=sqlite3
     ports:
       - "3000:3000"
     depends_on:
@@ -1015,8 +1052,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '0.1'
+          memory: 128M
+        reservations:
+          memory: 64M
     networks:
       - sre-network
 
@@ -1028,6 +1067,11 @@ services:
       - "9187:9187"
     depends_on:
       - postgres
+    deploy:
+      resources:
+        limits:
+          cpus: '0.05'
+          memory: 32M
     networks:
       - sre-network
 
@@ -1039,14 +1083,23 @@ services:
       - "9121:9121"
     depends_on:
       - redis
+    deploy:
+      resources:
+        limits:
+          cpus: '0.05'
+          memory: 32M
     networks:
       - sre-network
 
 volumes:
   postgres_data:
+    driver: local
   redis_data:
+    driver: local
   prometheus_data:
+    driver: local
   grafana_data:
+    driver: local
 
 networks:
   sre-network:
@@ -1064,17 +1117,30 @@ echo "=== SRE Practice Deployment ==="
 sudo sysctl -w fs.file-max=65536 2>/dev/null || true
 sudo sysctl -w vm.max_map_count=262144 2>/dev/null || true
 
+# Check available memory
+echo "Available memory:"
+free -h
+
 echo "Building services..."
 docker compose build --parallel
 
 echo "Starting infrastructure..."
 docker compose up -d postgres redis
 
-echo "Waiting for databases..."
+echo "Waiting for databases to be ready..."
+sleep 10
+
+echo "Starting application services..."
+docker compose up -d order-service payment-service
+
+echo "Waiting for application services..."
 sleep 5
 
-echo "Starting services..."
-docker compose up -d order-service payment-service api-gateway
+echo "Starting API Gateway..."
+docker compose up -d api-gateway
+
+echo "Waiting for API Gateway..."
+sleep 3
 
 echo "Starting monitoring..."
 docker compose up -d prometheus loki grafana postgres-exporter redis-exporter
@@ -1093,6 +1159,7 @@ echo "Useful commands:"
 echo "  View logs:    docker compose logs -f [service]"
 echo "  Stop all:     docker compose down"
 echo "  View stats:   docker stats"
+echo "  Check memory: free -h && docker stats --no-stream"
 EOF
 
 chmod +x deploy.sh
